@@ -6,6 +6,8 @@ export default class ConkyNextGenExtension extends Extension {
     enable() {
         this._trackedWindows = new Map();
         this._timeouts = [];
+        this._showingDesktop = false;
+        this._showDesktopMinimizedWindows = new Set();
 
         // 1. ALT+TAB FILTER: Safe C-level wrapper to exclude Conky windows
         this._origGetTabList = global.display.get_tab_list;
@@ -24,6 +26,17 @@ export default class ConkyNextGenExtension extends Extension {
                 this._setupWindowListeners(window);
             }
         );
+
+        // Replace Mutter's show-desktop action with the same minimize/restore
+        // toggle, except Conky widgets are deliberately left visible.
+        this._showDesktopHandlerInstalled = Meta.keybindings_set_custom_handler(
+            'show-desktop',
+            () => this._toggleShowDesktop()
+        );
+        if (!this._showDesktopHandlerInstalled)
+            console.error('[Conky-NextGen] Could not override the show-desktop shortcut');
+        else
+            console.log('[Conky-NextGen] Show Desktop shortcut will keep Conky visible');
 
         // 4. LIST ALREADY RUNNING WINDOWS: global.display.list_all_windows() (GNOME 50/51 C API)
         let existingWindows = global.display.list_all_windows ? global.display.list_all_windows() : [];
@@ -44,6 +57,13 @@ export default class ConkyNextGenExtension extends Extension {
             this._windowCreatedId = null;
         }
 
+        if (this._showDesktopHandlerInstalled) {
+            Meta.keybindings_set_custom_handler('show-desktop', null);
+            this._showDesktopHandlerInstalled = false;
+        }
+
+        this._restoreShowDesktopWindows();
+
         if (this._timeouts) {
             this._timeouts.forEach(id => GLib.source_remove(id));
             this._timeouts = [];
@@ -59,6 +79,50 @@ export default class ConkyNextGenExtension extends Extension {
             }
         }
         this._trackedWindows.clear();
+    }
+
+    _toggleShowDesktop() {
+        if (this._showingDesktop) {
+            this._restoreShowDesktopWindows();
+            return;
+        }
+
+        this._showingDesktop = true;
+        let workspace = global.workspace_manager.get_active_workspace();
+        let windows = global.display.list_all_windows();
+
+        for (let window of windows) {
+            if (!window || window._isConkyWidget || !window.get_compositor_private())
+                continue;
+            if (!window.located_on_workspace(workspace) || window.minimized || !window.can_minimize())
+                continue;
+
+            try {
+                window.minimize();
+                this._showDesktopMinimizedWindows.add(window);
+            } catch (e) {
+                console.error(`[Conky-NextGen] Could not minimize window for Show Desktop: ${e.message}`);
+            }
+        }
+
+        console.log('[Conky-NextGen] Show Desktop: minimized windows, leaving Conky visible');
+    }
+
+    _restoreShowDesktopWindows() {
+        this._showingDesktop = false;
+
+        for (let window of this._showDesktopMinimizedWindows) {
+            if (!window || !window.get_compositor_private() || !window.minimized)
+                continue;
+
+            try {
+                window.unminimize();
+            } catch (e) {
+                console.error(`[Conky-NextGen] Could not restore window after Show Desktop: ${e.message}`);
+            }
+        }
+
+        this._showDesktopMinimizedWindows.clear();
     }
 
     _setupWindowListeners(window) {

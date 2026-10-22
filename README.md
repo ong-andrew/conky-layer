@@ -1,6 +1,6 @@
-# Conky NextGen Layer (GNOME 50 / 51 Wayland Extension)
+# Conky NextGen Layer (GNOME Wayland Extension)
 
-A lightweight GNOME Shell extension providing native desktop pinning and pixel-perfect positioning for **Conky** under **Wayland** on **GNOME 50 and 51**.
+A lightweight GNOME Shell extension providing desktop pinning and pixel-perfect positioning for **Conky** under **Wayland**. Metadata currently declares GNOME Shell 45–51 support; the setup in [SETUP.md](SETUP.md) was verified on GNOME Shell 48.7.
 
 ---
 
@@ -12,15 +12,18 @@ Under GNOME Shell on Wayland, the compositor (Mutter) does not support the `wlr-
 - Clicking on a widget raises it over normal application windows.
 
 Modeled after the architecture of **Desktop Icons NG (DING)**, this extension bridges that gap from inside Mutter using internal GNOME Shell / Mutter C APIs:
-1. Places the Conky window on the true desktop layer (`Meta.WindowType.DESKTOP` / `META_LAYER_DESKTOP = 0`). This natively hides it from Win+D ("Show Desktop") and the taskbar.
+1. Keeps the Conky Wayland toplevel at the bottom of Mutter's normal window layer, below regular applications. GNOME 48 does not expose a supported API to change an already-created Wayland window to `Meta.WindowType.DESKTOP`.
 2. Fixes coordinates using Mutter's internal `move_frame(true, x, y)`.
 3. Pins widgets across all virtual workspaces (`stick()`).
-4. Completely removes widgets from **Alt+Tab** and the **Activities Overview**.
+4. Filters widgets out of the **Alt+Tab** window list.
 5. Automatically pushes widgets back down if clicked (`raised` signal handler).
+6. Overrides GNOME's **Show Desktop** shortcut with an equivalent minimize/restore toggle that leaves Conky visible.
 
 ---
 
 ## Installation
+
+For the full tested GNOME Wayland setup—including Conky window settings, logical-coordinate guidance, Show Desktop behavior, and AppImage autostart—see [SETUP.md](SETUP.md).
 
 ### Method 1: Debian / Ubuntu Package (.deb)
 
@@ -118,9 +121,10 @@ own_window_title = 'Conky_Clock @!380,380',
 
 | Feature | Mutter C Mechanism | Result |
 |---|---|---|
-| **Layer Stacking** | `meta_window_set_type(win, META_WINDOW_DESKTOP)` | Window is placed into `META_LAYER_DESKTOP` (layer `0`), sitting below all application windows. |
-| **Taskbar / Dock** | Auto-calculated by Mutter | Setting type to `DESKTOP` automatically enforces `skip_taskbar = TRUE` and excludes it from Win+D (Show Desktop). |
-| **Alt+Tab** | JS filter wrapper on `global.display.get_tab_list` | Safely excludes the widget from the Alt+Tab window cycler (as a fallback). |
+| **Layer Stacking** | `Meta.Window.lower()` + `raised` signal | Conky stays at the bottom of the normal layer, so applications cover it while it remains visible on the desktop. |
+| **Show Desktop** | Custom handler for Mutter's `show-desktop` keybinding | Minimizes the active workspace's other windows and restores them on the next shortcut press, leaving Conky visible. |
+| **Taskbar / Dock** | Conky's `skip_taskbar` window hint | Requests taskbar exclusion; handling depends on Mutter's Wayland integration. |
+| **Alt+Tab** | JS filter wrapper on `global.display.get_tab_list` | Excludes the widget from the Alt+Tab window cycler. |
 | **Positioning** | `meta_window_move_frame(win, true, x, y)` | Bypasses Wayland's client-side positioning prohibition directly from inside the compositor. |
 | **Click Behavior** | `raised` GObject signal listener | Re-lowers the widget instantly if clicked (`window.lower()`), preventing it from covering applications. |
 
